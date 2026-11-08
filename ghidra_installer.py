@@ -243,6 +243,22 @@ class _Theme:
             except Exception:
                 pass
 
+    # ── brand banner (navy, same in Light and Dark mode) ──
+    BANNER_BG    = "#16213E"
+    BANNER_TITLE = "#FFFFFF"
+    BANNER_SUB   = "#A8B2D1"
+
+    def banner(self, parent, title: str, subtitle: str,
+               title_size: int = 20) -> tk.Frame:
+        """Full-width navy header with a white title and a muted subtitle."""
+        bar = tk.Frame(parent, bg=self.BANNER_BG, highlightthickness=0, bd=0)
+        tk.Label(bar, text=title, bg=self.BANNER_BG, fg=self.BANNER_TITLE,
+                 font=(self.f_title[0], title_size, "bold")
+                 ).pack(pady=(14, 0))
+        tk.Label(bar, text=subtitle, bg=self.BANNER_BG, fg=self.BANNER_SUB,
+                 font=self.f_subtitle).pack(pady=(2, 14))
+        return bar
+
     # ── fonts ──
     def _fonts(self):
         fams = set(tkfont.families(self.root))
@@ -400,19 +416,15 @@ class GhidraInstaller(tk.Tk):
         style.configure("Value.TLabel", font=T.f_body)
         style.configure("TLabelframe.Label", font=T.f_small)
 
-        outer = ttk.Frame(self, padding=(24, 20, 24, 18))
+        # ── Header banner ───────────────────────────────────────
+        T.banner(self, "Ghidra Installer",
+                 "NSA Software Reverse Engineering Framework").pack(fill="x")
+
+        outer = ttk.Frame(self, padding=(20, 10, 20, 12))
         outer.pack(fill="both", expand=True)
 
-        # ── Header ──────────────────────────────────────────────
-        hdr = ttk.Frame(outer)
-        hdr.pack(fill="x", pady=(0, 14))
-        _SemLabel(hdr, text="Ghidra Installer", font=T.f_title).pack(anchor="w")
-        _SemLabel(hdr, role="secondary", font=T.f_subtitle,
-                  text="Install the NSA’s reverse-engineering suite as a native Mac app."
-                  ).pack(anchor="w", pady=(2, 0))
-
         # ── Release group ───────────────────────────────────────
-        card = ttk.Labelframe(outer, text="Release", padding=(16, 10, 16, 12))
+        card = ttk.Labelframe(outer, text="Release", padding=(16, 6, 16, 8))
         card.pack(fill="x")
         card.columnconfigure(1, weight=1)
         self._row_i = 0
@@ -421,14 +433,14 @@ class GhidraInstaller(tk.Tk):
             lbl = _SemLabel(parent, text=text, role="secondary",
                             font=T.f_body, anchor="e")
             lbl.grid(row=self._row_i, column=0, sticky="e",
-                     padx=(0, 12), pady=3)
+                     padx=(0, 12), pady=1)
             return lbl
 
         key(card, "Version:")
         self.combo_version = ttk.Combobox(
             card, textvariable=self._version_var,
             font=T.f_body, state="readonly", width=34)
-        self.combo_version.grid(row=self._row_i, column=1, sticky="w", pady=3)
+        self.combo_version.grid(row=self._row_i, column=1, sticky="w", pady=(1, 3))
         self.combo_version.bind("<<ComboboxSelected>>", self._on_version_selected)
         self.combo_version.set("Fetching releases…")
         self._row_i += 1
@@ -437,7 +449,7 @@ class GhidraInstaller(tk.Tk):
             key(parent, label)
             lbl = _SemLabel(parent, text="—", role=role,
                             font=font or T.f_body, anchor="w")
-            lbl.grid(row=self._row_i, column=1, sticky="w", pady=3)
+            lbl.grid(row=self._row_i, column=1, sticky="w", pady=1)
             self._row_i += 1
             return lbl
 
@@ -449,8 +461,8 @@ class GhidraInstaller(tk.Tk):
         self.lbl_natives   = info_row(card, "Native build:")
 
         # ── Install location group ──────────────────────────────
-        loc = ttk.Labelframe(outer, text="Install Location", padding=(16, 10, 16, 12))
-        loc.pack(fill="x", pady=(14, 0))
+        loc = ttk.Labelframe(outer, text="Install Location", padding=(16, 6, 16, 8))
+        loc.pack(fill="x", pady=(10, 0))
         row = ttk.Frame(loc)
         row.pack(fill="x")
         self.entry_dir = ttk.Entry(row, textvariable=self._install_dir,
@@ -460,23 +472,23 @@ class GhidraInstaller(tk.Tk):
                    command=self._browse).pack(side="left", padx=(8, 0))
         _SemLabel(loc, role="secondary", font=T.f_small,
                   text="A versioned app such as “Ghidra 12.2.app” is created in "
-                       "this folder.").pack(anchor="w", pady=(6, 0))
+                       "this folder.").pack(anchor="w", pady=(4, 0))
 
         # ── Progress ────────────────────────────────────────────
         pf = ttk.Frame(outer)
-        pf.pack(fill="x", pady=(16, 0))
+        pf.pack(fill="x", pady=(10, 0))
         self.lbl_status = _SemLabel(pf, text="Ready to install.",
                                     role="secondary", font=T.f_body, anchor="w")
         self.lbl_status.pack(fill="x")
         self.progress = ttk.Progressbar(pf, mode="determinate", length=460)
-        self.progress.pack(fill="x", pady=(6, 2))
+        self.progress.pack(fill="x", pady=(4, 2))
         self.lbl_detail = _SemLabel(pf, text=" ", role="secondary",
                                     font=T.f_small, anchor="w")
         self.lbl_detail.pack(fill="x")
 
         # ── Buttons (primary action rightmost, per macOS HIG) ───
         bf = ttk.Frame(outer)
-        bf.pack(fill="x", pady=(12, 14))
+        bf.pack(fill="x", pady=(8, 10))
         ttk.Button(bf, text="Quit",
                    command=self._quit).pack(side="left")
         ttk.Button(bf, text="Manage Installs…",
@@ -492,7 +504,7 @@ class GhidraInstaller(tk.Tk):
         # ── Log ─────────────────────────────────────────────────
         lf = ttk.Labelframe(outer, text="Activity", padding=(2, 2, 2, 2))
         lf.pack(fill="both", expand=True)
-        self.log = tk.Text(lf, height=7, font=T.f_mono,
+        self.log = tk.Text(lf, height=6, font=T.f_mono,
                            wrap="word", state="disabled",
                            relief="flat", borderwidth=0, highlightthickness=0,
                            padx=10, pady=8, spacing1=1, spacing3=1)
@@ -590,9 +602,28 @@ class GhidraInstaller(tk.Tk):
             self.after(50, self._centre_window)
             return
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        self.geometry(f"+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 3)}")
-        # Lock the size only now that the window has its real size
-        self.resizable(False, False)
+        # Usable height: screen minus menu bar (~38), Dock (~90) and the
+        # window's title bar (~28).  On small/VM screens the window is
+        # capped to this and the Activity log (packed last, expand=True)
+        # gives up the space — so nothing is ever clipped off-screen.
+        avail = sh - 156
+        try:
+            mh = int(self.maxsize()[1])
+            if 300 < mh < avail:
+                avail = mh - 28
+        except Exception:
+            pass
+        if w < 400 or h < 400:
+            # Layout never reported a sane size — position only, never lock
+            self.geometry(f"+{max(0, (sw - w) // 2)}+60")
+            return
+        h = min(h, max(480, avail))
+        x = max(0, (sw - w) // 2)
+        y = max(38, min((sh - h) // 3, sh - h - 118))
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        # Width fixed at the layout width; height can grow to show more log
+        self.minsize(w, min(h, 520))
+        self.resizable(False, True)
         _dbg(f"window placed: {self.geometry()}")
         if _DEBUG:
             for c in self.winfo_children():
@@ -2076,14 +2107,11 @@ exec "$GHIDRA_DIR/ghidraRun"
         dlg.grab_set()
 
         T = self.theme
-        body = ttk.Frame(dlg, padding=(20, 18, 20, 16))
+        T.banner(dlg, "Manage Ghidra Installations",
+                 "Select a version to remove it or show it in Finder.",
+                 title_size=16).pack(fill="x")
+        body = ttk.Frame(dlg, padding=(20, 14, 20, 16))
         body.pack(fill="both", expand=True)
-
-        _SemLabel(body, text="Installed Versions",
-                  font=(T.f_title[0], 17, "bold")).pack(anchor="w")
-        _SemLabel(body, role="secondary", font=T.f_body,
-                  text="Select a version to remove it or show it in Finder."
-                  ).pack(anchor="w", pady=(2, 12))
 
         # Treeview
         tv_frame = ttk.Frame(body)

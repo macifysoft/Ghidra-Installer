@@ -108,9 +108,3 @@ Both scripts are compatible with **PyInstaller**. The macOS version includes SSL
 ## Disclaimer
 
 This installer is an unofficial third-party tool. Ghidra is developed and maintained by the [National Security Agency](https://github.com/NationalSecurityAgency/ghidra). Temurin JDK is provided by [Eclipse Adoptium](https://adoptium.net/). This project is not affiliated with either.
-
-<!-- macify-screenshots:start -->
-## Screenshots
-
-![App screen Shot](screenshots/screen-shot-2026-11-14-at-20.58.01.jpg)
-<!-- macify-screenshots:end -->

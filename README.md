@@ -17,6 +17,9 @@ A lightweight, standalone GUI installer for [Ghidra](https://ghidra-sre.org/) â€
 - All install metadata stored locally; no telemetry, no internet use beyond GitHub and Adoptium APIs
 
 ### macOS
+
+<!-- macify-shot sep=1 --><p align="center"><img src="screenshots/macos.jpg" alt="macOS app screenshot" width="50%"></p><!-- /macify-shot -->
+
 - Wraps Ghidra in a native **`.app` bundle** with correct `Info.plist`, icon (`.icns`), and executable permissions
 - Builds Ghidra's **native macOS components** automatically for releases that require it (Ghidra 12.1+)
 - **Silent Rosetta 2 install** on Apple Silicon when running an Intel-only Ghidra build
@@ -27,6 +30,9 @@ A lightweight, standalone GUI installer for [Ghidra](https://ghidra-sre.org/) â€
 - Trash-based removal (no `tell application "Finder"` â€” no Automation permission dialog)
 
 ### Windows
+
+<!-- macify-shot sep=1 --><p align="center"><img src="screenshots/windows.jpg" alt="Windows app Screenshot" width="50%"></p><!-- /macify-shot -->
+
 - Creates a **batch launcher** and a **VBScript wrapper** so Ghidra opens without a visible CMD window
 - Optional **Desktop shortcut** and **Start Menu entry** (both toggleable before install)
 - Shell notification (`SHChangeNotify`) so shortcuts appear immediately without a logoff
@@ -108,9 +114,3 @@ Both scripts are compatible with **PyInstaller**. The macOS version includes SSL
 ## Disclaimer
 
 This installer is an unofficial third-party tool. Ghidra is developed and maintained by the [National Security Agency](https://github.com/NationalSecurityAgency/ghidra). Temurin JDK is provided by [Eclipse Adoptium](https://adoptium.net/). This project is not affiliated with either.
-
-<!-- macify-screenshots:start -->
-## Screenshots
-
-![App screen Shot](screenshots/screen-shot-2026-11-14-at-20.58.01.jpg)
-<!-- macify-screenshots:end -->

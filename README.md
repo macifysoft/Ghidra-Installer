@@ -31,7 +31,7 @@ A lightweight, standalone GUI installer for [Ghidra](https://ghidra-sre.org/) â€
 
 ### Windows
 
-<!-- macify-shot sep=1 --><p align="center"><img src="screenshots/windows.jpg" alt="Windows app Screenshot" width="50%"></p><!-- /macify-shot -->
+<!-- macify-shot sep=1 --><p align="center"><img src="screenshots/windows-2.jpg" alt="windows 2" width="50%"></p><!-- /macify-shot -->
 
 - Creates a **batch launcher** and a **VBScript wrapper** so Ghidra opens without a visible CMD window
 - Optional **Desktop shortcut** and **Start Menu entry** (both toggleable before install)

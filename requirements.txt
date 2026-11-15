@@ -1,0 +1,14 @@
+# Ghidra Installer — Python requirements
+#
+# Running the installers from source needs NOTHING from this file:
+#   ghidra_installer_macOS.py and ghidra_installer_windows.py use only the
+#   Python standard library (tkinter, urllib, ssl, zipfile, …).
+#   Python 3.8+ with tkinter is all that's required.
+#
+# These packages are only for BUILDING the macOS app
+# (build_installer_app.py installs them automatically if missing):
+#
+#   pip install -r requirements.txt
+
+pyinstaller>=6.0   # bundles Python + tkinter into GhidraInstaller.app
+certifi            # CA certificates shipped inside the app for HTTPS downloads

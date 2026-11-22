@@ -8,6 +8,7 @@ Requirements: Python 3.8+  (no third-party packages needed)
 """
 
 import glob as _glob
+import hashlib
 import json
 import os
 import platform
@@ -337,6 +338,46 @@ def _append_install(entry: dict, log=None):
 # ──────────────────────────────────────────────────────────────────
 #  Main application
 # ──────────────────────────────────────────────────────────────────
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Download integrity (SHA-256)
+# ──────────────────────────────────────────────────────────────────
+
+class ChecksumError(RuntimeError):
+    """A downloaded file does not match its published SHA-256."""
+
+
+_SHA256_RE = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
+
+
+def _expected_sha256(asset: dict, body: str) -> "tuple[str, str]":
+    """Return (sha256, source) for a GitHub release asset, or ("", "").
+
+    1. GitHub's own asset digest ("sha256:…"), computed by GitHub on upload.
+    2. The release notes' "SHA-256: <hash>" line (Ghidra's published format).
+    3. A line in the notes that names the asset file.
+    4. The first 64-hex-digit value anywhere in the notes.
+    """
+    digest = (asset.get("digest") or "").strip()
+    if digest.lower().startswith("sha256:"):
+        m = _SHA256_RE.fullmatch(digest[7:])
+        if m:
+            return m.group(0).lower(), "GitHub asset digest"
+
+    lines = (body or "").splitlines()
+    name  = asset.get("name", "")
+    tests = (lambda l: "sha" in l.lower(),
+             lambda l: bool(name) and name in l,
+             lambda l: True)
+    for test in tests:
+        for line in lines:
+            if test(line):
+                m = _SHA256_RE.search(line)
+                if m:
+                    return m.group(0).lower(), "release notes"
+    return "", ""
+
 
 class GhidraInstaller(tk.Tk):
 
@@ -939,6 +980,8 @@ class GhidraInstaller(tk.Tk):
                 f"Check https://adoptium.net/ and install JDK {java_major} manually.")
         pkg = data[0]["binary"]["package"]
         ver = data[0]["version"]["semver"]
+        # Adoptium publishes a SHA-256 for every package
+        self._java_expected_sha = (pkg.get("checksum") or "").strip().lower()
         return pkg["link"], pkg["size"], ver
 
     def _install_java_tarball(self, tar_path: Path, java_ver: str,
@@ -1052,12 +1095,7 @@ class GhidraInstaller(tk.Tk):
         if not asset:
             return None
 
-        sha = ""
-        for line in body.splitlines():
-            m = re.search(r"[0-9a-f]{64}", line, re.IGNORECASE)
-            if m:
-                sha = m.group(0)
-                break
+        sha, sha_src = _expected_sha256(asset, body)
 
         ver = tag.replace("Ghidra_", "").replace("_build", "")
         return {
@@ -1068,6 +1106,7 @@ class GhidraInstaller(tk.Tk):
             "filename": asset["name"],
             "size":     asset.get("size", 0),
             "sha256":   sha,
+            "sha_source": sha_src,
         }
 
     def _fetch_releases(self):
@@ -1133,7 +1172,11 @@ class GhidraInstaller(tk.Tk):
 
         self.lbl_date.configure(text=r["date"])
         self.lbl_size.configure(text=fmt_size(r["size"]))
-        self.lbl_sha.configure(text=r["sha256"] if r["sha256"] else "Not available")
+        self._expected_sha = r["sha256"]
+        self._sha_source   = r.get("sha_source", "")
+        self.lbl_sha.configure(
+            text=r["sha256"] if r["sha256"] else "Not published — can't be verified",
+            fg="gray" if r["sha256"] else "orange")
         self.lbl_natives.configure(
             text=build_note,
             fg="orange" if needs_build else "#4CAF50")
@@ -1413,7 +1456,14 @@ class GhidraInstaller(tk.Tk):
             self._log(f"URL : {self._download_url}")
             self._log(f"Dest: {tmp_zip}")
             self._set_status("[1/3] Downloading Ghidra…", "blue")
-            self._download(self._download_url, tmp_zip)
+            _sha = self._download(self._download_url, tmp_zip,
+                                  expected_sha256=getattr(self, "_expected_sha", ""),
+                                  what="Ghidra")
+            if _sha and not self._cancel:
+                _ok = bool(getattr(self, "_expected_sha", ""))
+                self.after(0, lambda h=_sha, ok=_ok: self.lbl_sha.configure(
+                    text=f"{h}  ✓ verified" if ok else f"{h}  (not verified)",
+                    fg="green" if ok else "orange"))
             if self._cancel:
                 self._log("Cancelled.")
                 self._reset_ui()
@@ -1478,7 +1528,9 @@ class GhidraInstaller(tk.Tk):
                 tmp_jdk = work_dir / f"temurin-jdk-{java_major}.tar.gz"
                 self._set_status(
                     f"[3/4] Downloading Java {java_major} ({fmt_size(java_size)})…", "blue")
-                self._download(java_url, tmp_jdk, hint_size=java_size)
+                self._download(java_url, tmp_jdk, hint_size=java_size,
+                               expected_sha256=getattr(self, "_java_expected_sha", ""),
+                               what="JDK")
                 if self._cancel:
                     self._log("Cancelled.")
                     self._reset_ui()
@@ -1548,6 +1600,16 @@ class GhidraInstaller(tk.Tk):
             self._log(f"\n✓ Done — {app_final}")
             self.after(0, lambda: self._finish(app_final))
 
+        except ChecksumError as exc:
+            self._log(f"\n✗ {exc}")
+            self._set_status("Download failed its SHA-256 check — nothing installed", "red")
+            self.after(0, lambda m=str(exc): messagebox.showerror(
+                "Download failed verification",
+                f"{m}.\n\nThe file has been deleted and nothing was "
+                "installed. Please try again. If it keeps happening, check "
+                "your network (a proxy or antivirus can alter downloads) "
+                "and report it.", parent=self))
+            self._reset_ui()
         except Exception as exc:
             import traceback
             self._log(f"\n✗ Error: {exc}")
@@ -1562,19 +1624,30 @@ class GhidraInstaller(tk.Tk):
 
     # ── Download with progress ────────────────────────────────────
 
-    def _download(self, url: str, dest: Path, hint_size: int = 0):
+    def _download(self, url: str, dest: Path, hint_size: int = 0,
+                  expected_sha256: str = "", what: str = "file") -> str:
+        """Download url → dest with progress, hashing as it goes.
+
+        Returns the SHA-256 of the downloaded file ("" if cancelled).
+        Raises RuntimeError if the download is shorter than the server said,
+        and ChecksumError (after deleting dest) if expected_sha256 is given
+        and doesn't match.
+        """
         req = urllib.request.Request(url, headers={"User-Agent": "GhidraInstaller/1.0"})
         t0  = time.time()
         got = 0
+        hasher = hashlib.sha256()
         with urllib.request.urlopen(req, timeout=120,
                                     context=create_ssl_context()) as resp:
-            total = int(resp.headers.get("Content-Length") or hint_size or self._asset_size or 0)
+            server_len = int(resp.headers.get("Content-Length") or 0)
+            total = server_len or hint_size or self._asset_size or 0
             with open(dest, "wb") as fh:
                 while not self._cancel:
                     chunk = resp.read(CHUNK_SIZE)
                     if not chunk:
                         break
                     fh.write(chunk)
+                    hasher.update(chunk)
                     got += len(chunk)
                     elapsed = time.time() - t0 or 0.001
                     speed   = got / elapsed
@@ -1585,8 +1658,36 @@ class GhidraInstaller(tk.Tk):
                                + f"  {fmt_speed(speed)}{eta}")
                     self._set_progress(pct)
                     self._set_detail(detail)
-        if not self._cancel:
-            self._log(f"Downloaded {fmt_size(got)} in {time.time()-t0:.1f}s")
+        if self._cancel:
+            return ""
+        self._log(f"Downloaded {fmt_size(got)} in {time.time()-t0:.1f}s")
+        return self._verify_download(dest, hasher.hexdigest(), got, server_len,
+                                     expected_sha256, what)
+
+    def _verify_download(self, dest: Path, actual: str, got: int,
+                         server_len: int, expected: str, what: str) -> str:
+        """Check a finished download's length and SHA-256."""
+        if server_len and got != server_len:
+            dest.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"{what} download incomplete: received {got:,} of "
+                f"{server_len:,} bytes. Check your connection and try again.")
+        self._set_detail(f"Verifying {what}…")
+        if not expected:
+            self._log(f"⚠ No published SHA-256 for the {what} download — integrity "
+                      f"not verified.\n  SHA-256: {actual}")
+            return actual
+        if actual != expected.lower():
+            dest.unlink(missing_ok=True)
+            self._log(f"✗ SHA-256 mismatch for {what}\n"
+                      f"  Expected: {expected.lower()}\n"
+                      f"  Got     : {actual}\n"
+                      f"  The download was deleted; nothing was installed.")
+            raise ChecksumError(
+                f"{what} failed its SHA-256 check — the download may be "
+                f"corrupted or tampered with")
+        self._log(f"SHA-256 verified ✓  {actual}")
+        return actual
 
     # ── Build macOS native components (Ghidra 12.1+) ────────────────
 

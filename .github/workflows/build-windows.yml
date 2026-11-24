@@ -69,7 +69,7 @@ jobs:
           )
           if (Test-Path ghidra.ico) { $pyiArgs += @("--icon", "ghidra.ico") }
           $pyiArgs += "ghidra_installer_windows.py"
-          python -m PyInstaller @args
+          python -m PyInstaller @pyiArgs
           if (-not (Test-Path dist\GhidraInstaller.exe)) { throw "GhidraInstaller.exe was not produced" }
 
       - name: Smoke-test the executable

@@ -27,6 +27,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+import tkinter.font as tkfont
 
 # Suppress CMD windows for all subprocess calls on Windows
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -192,6 +193,98 @@ def _get_start_menu_programs_dir():
 
 
 # ──────────────────────────────────────────────────────────────────
+#  Appearance (matches the macOS version's layout)
+# ──────────────────────────────────────────────────────────────────
+
+# Legacy colour names used around the code → semantic roles
+_ROLE_ALIASES = {
+    "gray": "secondary", "grey": "secondary", "secondary": "secondary",
+    "blue": "accent", "accent": "accent",
+    "green": "green", "#4caf50": "green",
+    "orange": "orange", "darkorange": "orange",
+    "red": "red", "#cc3333": "red",
+    "black": "primary", "white": "primary", "primary": "primary",
+}
+
+
+class _Theme:
+    """Colours and fonts for the Windows UI.
+
+    Tk's native Windows theme ("vista") is light-only, so this uses the
+    Windows 11 light palette, with status colours chosen to stay readable
+    on the light window background.
+    """
+    COLORS = {
+        "primary":   "#1A1A1A",
+        "secondary": "#5F5F5F",
+        "accent":    "#005FB8",     # Windows 11 default accent
+        "green":     "#0F7B0F",
+        "orange":    "#BC4B09",
+        "red":       "#C42B1C",
+        "textbg":    "#FFFFFF",
+        "text":      "#1A1A1A",
+        "border":    "#D1D1D1",
+    }
+    BANNER_BG    = "#16213E"
+    BANNER_TITLE = "#FFFFFF"
+    BANNER_SUB   = "#A8B2D1"
+
+    def __init__(self, root: tk.Misc):
+        self.root = root
+        fams = set(tkfont.families(root))
+        base = tkfont.nametofont("TkDefaultFont").actual().get("family", "Segoe UI")
+        ui   = next((f for f in ("Segoe UI Variable Text", "Segoe UI") if f in fams), base)
+        disp = next((f for f in ("Segoe UI Variable Display", "Segoe UI") if f in fams), ui)
+        mono = next((f for f in ("Cascadia Mono", "Consolas", "Lucida Console")
+                     if f in fams), "Courier New")
+        self.f_title    = (disp, 20, "bold")
+        self.f_subtitle = (ui, 11)
+        self.f_body     = (ui, 10)
+        self.f_small    = (ui, 9)
+        self.f_mono     = (mono, 9)
+        self.f_monosm   = (mono, 9)
+
+    def color(self, role: str) -> str:
+        return self.COLORS.get(_ROLE_ALIASES.get(str(role).lower(), role),
+                               self.COLORS["primary"])
+
+    def paint(self, widget, role: str):
+        ttk.Label.configure(widget, foreground=self.color(role))
+
+    def banner(self, parent, title: str, subtitle: str,
+               title_size: int = 20) -> tk.Frame:
+        """Full-width navy header with a white title and a muted subtitle."""
+        bar = tk.Frame(parent, bg=self.BANNER_BG, highlightthickness=0, bd=0)
+        tk.Label(bar, text=title, bg=self.BANNER_BG, fg=self.BANNER_TITLE,
+                 font=(self.f_title[0], title_size, "bold")).pack(pady=(14, 0))
+        tk.Label(bar, text=subtitle, bg=self.BANNER_BG, fg=self.BANNER_SUB,
+                 font=self.f_subtitle).pack(pady=(2, 14))
+        return bar
+
+
+class _SemLabel(ttk.Label):
+    """ttk.Label that understands legacy fg="blue"/"gray"/"#4CAF50"/… and
+    maps it to the theme's colours, so existing call sites keep working."""
+    theme: "_Theme | None" = None
+
+    def __init__(self, master=None, role: str = "primary", **kw):
+        kw.pop("fg", None)
+        super().__init__(master, **kw)
+        if _SemLabel.theme:
+            _SemLabel.theme.paint(self, role)
+
+    def configure(self, cnf=None, **kw):
+        fg = kw.pop("fg", None)
+        if fg is not None and _SemLabel.theme:
+            _SemLabel.theme.paint(self, fg)
+        if cnf or kw:
+            return super().configure(cnf, **kw)
+        return None
+
+    config = configure
+
+
+# ──────────────────────────────────────────────────────────────────
 #  Main application
 # ──────────────────────────────────────────────────────────────────
 
@@ -251,13 +344,18 @@ class GhidraInstallerWindows(tk.Tk):
         self._releases:     list = []
         self._version_var   = tk.StringVar()
 
-        self._build_ui()
+        self._closing = False
+        try:
+            self._build_ui()
+        except Exception:
+            import traceback
+            messagebox.showerror("Ghidra Installer — UI error", traceback.format_exc())
+            raise
 
-        self.update_idletasks()
-        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
-        w, h   = self.winfo_reqwidth(),    self.winfo_reqheight()
-        self.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
-        self.minsize(560, 620)
+        # Size to content, then centre (never force a size before layout)
+        self._centre_tries = 0
+        self.after(0, self._centre_window)
+        self.protocol("WM_DELETE_WINDOW", self._quit)
 
         self.lift()
         self.attributes("-topmost", True)
@@ -272,128 +370,227 @@ class GhidraInstallerWindows(tk.Tk):
 
     def _build_ui(self):
         style = ttk.Style()
-        style.theme_use("vista")          # native Windows theme
+        try:
+            style.theme_use("vista")          # native Windows theme
+        except tk.TclError:
+            pass                              # e.g. Wine without vista
 
-        PAD = dict(padx=20, pady=6)
+        T = self.theme = _Theme(self)
+        _SemLabel.theme = T
+        style.configure("TLabelframe.Label", font=T.f_body)
+        style.configure("TCheckbutton", font=T.f_body)
 
-        # Header
-        hdr = tk.Frame(self, bg="#16213e")
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Ghidra Installer",
-                 font=("Segoe UI", 20, "bold"),
-                 fg="white", bg="#16213e", pady=14).pack()
-        tk.Label(hdr, text="NSA Software Reverse Engineering Framework",
-                 font=("Segoe UI", 11),
-                 fg="#8892b0", bg="#16213e").pack(pady=(0, 12))
+        # ── Header banner ───────────────────────────────────────
+        T.banner(self, "Ghidra Installer",
+                 "NSA Software Reverse Engineering Framework").pack(fill="x")
 
-        # Release card
-        card = tk.LabelFrame(self, text=" Ghidra Release ",
-                             font=("Segoe UI", 10), padx=14, pady=8)
-        card.pack(fill="x", **PAD)
+        outer = ttk.Frame(self, padding=(20, 10, 20, 14))
+        outer.pack(fill="both", expand=True)
+        # All controls go in `left`; the Activity log goes below it or
+        # beside it depending on how much screen height there is.
+        left = ttk.Frame(outer)
 
-        # Version selector
-        ver_row = tk.Frame(card)
-        ver_row.pack(fill="x", pady=2)
-        tk.Label(ver_row, text="Version:",
-                 font=("Segoe UI", 10, "bold"),
-                 width=14, anchor="w").pack(side="left")
+        # ── Release group ───────────────────────────────────────
+        card = ttk.Labelframe(left, text="Release", padding=(14, 6, 14, 8))
+        card.pack(fill="x")
+        card.columnconfigure(1, weight=1)
+        self._row_i = 0
+
+        def key(parent, text):
+            lbl = _SemLabel(parent, text=text, role="secondary",
+                            font=T.f_body, anchor="e")
+            lbl.grid(row=self._row_i, column=0, sticky="e",
+                     padx=(0, 12), pady=1)
+            return lbl
+
+        key(card, "Version:")
         self.combo_version = ttk.Combobox(
-            ver_row, textvariable=self._version_var,
-            font=("Segoe UI", 10), state="readonly", width=32)
-        self.combo_version.pack(side="left", fill="x", expand=True)
+            card, textvariable=self._version_var,
+            font=T.f_body, state="readonly", width=34)
+        self.combo_version.grid(row=self._row_i, column=1, sticky="w", pady=(1, 3))
         self.combo_version.bind("<<ComboboxSelected>>", self._on_version_selected)
         self.combo_version.set("Fetching releases…")
+        self._row_i += 1
 
-        def info_row(parent, label):
-            row = tk.Frame(parent)
-            row.pack(fill="x", pady=2)
-            tk.Label(row, text=label, font=("Segoe UI", 10, "bold"),
-                     width=14, anchor="w").pack(side="left")
-            lbl = tk.Label(row, text="—", font=("Segoe UI", 10))
-            lbl.pack(side="left")
+        def info_row(parent, label, font=None, role="primary"):
+            key(parent, label)
+            lbl = _SemLabel(parent, text="—", role=role,
+                            font=font or T.f_body, anchor="w")
+            lbl.grid(row=self._row_i, column=1, sticky="w", pady=1)
+            self._row_i += 1
             return lbl
 
         self.lbl_installed = info_row(card, "Installed:")
         self.lbl_date      = info_row(card, "Released:")
-        self.lbl_size      = info_row(card, "Size:")
-        self.lbl_sha       = info_row(card, "SHA-256:")
-        self.lbl_java      = info_row(card, "Java 25+:")
-        self.lbl_natives   = info_row(card, "Windows build:")
+        self.lbl_size      = info_row(card, "Download size:")
+        self.lbl_sha       = info_row(card, "SHA-256:", font=T.f_monosm, role="secondary")
+        self.lbl_java      = info_row(card, "Java:")
+        self.lbl_natives   = info_row(card, "Native build:")
 
-        # Install location
-        loc = tk.LabelFrame(self, text=" Install Location ",
-                            font=("Segoe UI", 10), padx=14, pady=8)
-        loc.pack(fill="x", **PAD)
-        row = tk.Frame(loc)
+        # ── Install location group (with shortcut options) ──────
+        loc = ttk.Labelframe(left, text="Install Location", padding=(14, 6, 14, 8))
+        loc.pack(fill="x", pady=(10, 0))
+        row = ttk.Frame(loc)
         row.pack(fill="x")
         self.entry_dir = ttk.Entry(row, textvariable=self._install_dir,
-                                   font=("Segoe UI", 10))
+                                   font=T.f_body)
         self.entry_dir.pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="Browse…",
                    command=self._browse).pack(side="left", padx=(8, 0))
-        tk.Label(loc,
-                 text="Ghidra will be extracted into a subfolder here. "
-                      "A Desktop shortcut will also be created.",
-                 font=("Segoe UI", 9), fg="gray",
-                 wraplength=420, justify="left").pack(anchor="w", pady=(4, 0))
-
-        # Options
-        opt = tk.LabelFrame(self, text=" Options ",
-                            font=("Segoe UI", 10), padx=14, pady=8)
-        opt.pack(fill="x", **PAD)
+        _SemLabel(loc, role="secondary", font=T.f_small,
+                  text="Each Ghidra version is installed in its own subfolder "
+                       "here.").pack(anchor="w", pady=(4, 2))
+        opts = ttk.Frame(loc)
+        opts.pack(fill="x")
         self._shortcut_var  = tk.BooleanVar(value=True)
         self._startmenu_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(opt, text="Create Desktop shortcut",
-                        variable=self._shortcut_var).pack(anchor="w")
-        ttk.Checkbutton(opt, text="Add to Start Menu",
-                        variable=self._startmenu_var).pack(anchor="w")
+        ttk.Checkbutton(opts, text="Desktop shortcut",
+                        variable=self._shortcut_var).pack(side="left")
+        ttk.Checkbutton(opts, text="Start Menu shortcut",
+                        variable=self._startmenu_var).pack(side="left", padx=(16, 0))
 
-        # Progress
-        pf = tk.Frame(self, padx=20, pady=4)
-        pf.pack(fill="x")
-        self.lbl_status = tk.Label(pf, text="Ready",
-                                   font=("Segoe UI", 10), anchor="w")
+        # ── Progress ────────────────────────────────────────────
+        pf = ttk.Frame(left)
+        pf.pack(fill="x", pady=(10, 0))
+        self.lbl_status = _SemLabel(pf, text="Ready to install.",
+                                    role="secondary", font=T.f_body, anchor="w")
         self.lbl_status.pack(fill="x")
         self.progress = ttk.Progressbar(pf, mode="determinate", length=460)
-        self.progress.pack(fill="x", pady=(4, 0))
-        self.lbl_detail = tk.Label(pf, text="",
-                                   font=("Segoe UI", 9), anchor="w")
+        self.progress.pack(fill="x", pady=(4, 2))
+        self.lbl_detail = _SemLabel(pf, text=" ", role="secondary",
+                                    font=T.f_small, anchor="w")
         self.lbl_detail.pack(fill="x")
 
-        # Buttons
-        bf = tk.Frame(self, padx=20, pady=12)
-        bf.pack(fill="x")
+        # ── Buttons (main action rightmost, like the macOS version) ─
+        bf = ttk.Frame(left)
+        bf.pack(fill="x", pady=(8, 0))
         ttk.Button(bf, text="Quit",
-                   command=self.destroy).pack(side="left")
-        ttk.Button(bf, text="Uninstall…",
+                   command=self._quit).pack(side="left")
+        ttk.Button(bf, text="Manage Installs…",
                    command=self._show_uninstall_dialog).pack(side="left", padx=(8, 0))
-        self.btn_cancel = ttk.Button(bf, text="Cancel",
-                                     command=self._cancel_install,
-                                     state="disabled")
-        self.btn_cancel.pack(side="right", padx=(8, 0))
         self.btn_install = ttk.Button(bf, text="Download & Install",
-                                      command=self._start_install,
-                                      state="disabled")
+                                      default="active",
+                                      command=self._start_install, state="disabled")
         self.btn_install.pack(side="right")
+        self.btn_cancel = ttk.Button(bf, text="Cancel",
+                                     command=self._cancel_install, state="disabled")
+        self.btn_cancel.pack(side="right", padx=(0, 8))
 
-        # Log
-        lf = tk.LabelFrame(self, text=" Log ",
-                           font=("Segoe UI", 10), padx=12, pady=6)
-        lf.pack(fill="both", expand=True, padx=20, pady=(0, 16))
-        dark  = is_dark_mode()
-        logbg = "#1c1c1e" if dark else "#f5f5f5"
-        logfg = "#e5e5ea" if dark else "#1c1c1e"
-        self.log = tk.Text(lf, height=9, font=("Consolas", 9),
+        # ── Activity log ────────────────────────────────────────
+        lf = ttk.Labelframe(outer, text="Activity", padding=(2, 2, 2, 2))
+        self.log = tk.Text(lf, height=6, width=52, font=T.f_mono,
                            wrap="word", state="disabled",
-                           bg=logbg, fg=logfg)
+                           relief="flat", borderwidth=0,
+                           highlightthickness=1,
+                           highlightbackground=T.color("border"),
+                           highlightcolor=T.color("border"),
+                           bg=T.color("textbg"), fg=T.color("text"),
+                           selectbackground=T.color("accent"),
+                           padx=10, pady=8, spacing1=1, spacing3=1)
         sb = ttk.Scrollbar(lf, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.log.pack(fill="both", expand=True)
 
+        # ── Layout: log below (tall screens) or beside (short screens) ──
+        self.update_idletasks()
+        banner_h  = 100
+        line_h    = tkfont.Font(font=T.f_mono).metrics("linespace") + 2
+        log_min   = 6 * line_h + 60
+        stacked_h = banner_h + left.winfo_reqheight() + 24 + log_min + 14
+        avail_h   = self.winfo_screenheight() - 90     # taskbar + title bar
+        self._log_beside = stacked_h > avail_h
+        if self._log_beside:
+            left.pack(side="left", fill="y", anchor="n")
+            lf.pack(side="left", fill="both", expand=True, padx=(16, 0))
+        else:
+            left.pack(fill="x")
+            lf.pack(fill="both", expand=True, pady=(12, 0))
+
+    # ── Window placement / quitting ───────────────────────────────
+
+    def _centre_window(self):
+        """Fit the window on screen and centre it once its size is known."""
+        self.update_idletasks()
+        w = max(self.winfo_reqwidth(),  self.winfo_width())
+        h = max(self.winfo_reqheight(), self.winfo_height())
+        if (w < 400 or h < 400) and self._centre_tries < 20:
+            self._centre_tries += 1
+            self.after(50, self._centre_window)
+            return
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        if w < 400 or h < 400:
+            self.geometry(f"+{max(0, (sw - w) // 2)}+40")
+            return
+        avail = sh - 90                     # taskbar (~48) + title bar (~32)
+        h = min(h, max(480, avail))
+        x = max(0, (sw - w) // 2)
+        y = max(0, min((sh - h) // 3, sh - h - 80))
+        self.geometry(f"{w}x{h}+{x}+{y}")
+        self.minsize(w if not self._log_beside else min(w, 900),
+                     min(h, 480 if self._log_beside else 520))
+
+    def _install_running(self) -> bool:
+        try:
+            return self.btn_cancel.instate(["!disabled"])
+        except Exception:
+            return False
+
+    @staticmethod
+    def _kill_child_processes():
+        """Stop processes this app started (winget, PowerShell, robocopy…)."""
+        try:
+            ps = (f"Get-CimInstance Win32_Process -Filter 'ParentProcessId={os.getpid()}' "
+                  "| Where-Object { $_.ProcessId -ne $PID } "
+                  "| Select-Object -ExpandProperty ProcessId")
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive",
+                                "-Command", ps], capture_output=True, text=True,
+                               timeout=10, creationflags=_CREATE_NO_WINDOW)
+            for pid in r.stdout.split():
+                if pid.isdigit():
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", pid],
+                                   capture_output=True,
+                                   creationflags=_CREATE_NO_WINDOW)
+        except Exception:
+            pass
+
+    def _quit(self, *_):
+        """Quit cleanly, even mid-install (asks first if an install is running)."""
+        if getattr(self, "_closing", False):
+            return
+        if self._install_running():
+            if not messagebox.askyesno(
+                    "Quit Ghidra Installer?",
+                    "An installation is still in progress.\n\n"
+                    "If you quit now it will be stopped and the partial "
+                    "download removed.",
+                    icon="warning", default="no", parent=self):
+                return
+            self._closing = True
+            self._cancel  = True
+            self._kill_child_processes()
+        self._closing = True
+        try:
+            self.quit()
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
+
+    def report_callback_exception(self, exc, val, tb):
+        """Show Tk callback errors in the Activity log instead of losing them."""
+        import traceback
+        msg = "".join(traceback.format_exception(exc, val, tb))
+        try:
+            self._log("✗ Internal error:\n" + msg)
+        except Exception:
+            pass
+
     # ── Helpers ───────────────────────────────────────────────────
 
     def _log(self, msg: str):
+        if self._closing:
+            return
         def _do():
             self.log.configure(state="normal")
             self.log.insert("end", msg + "\n")
@@ -402,12 +599,18 @@ class GhidraInstallerWindows(tk.Tk):
         self.after(0, _do)
 
     def _set_status(self, msg: str, color: str = "gray"):
+        if self._closing:
+            return
         self.after(0, lambda: self.lbl_status.configure(text=msg, fg=color))
 
     def _set_detail(self, msg: str):
+        if self._closing:
+            return
         self.after(0, lambda: self.lbl_detail.configure(text=msg))
 
     def _set_progress(self, pct: float):
+        if self._closing:
+            return
         self.after(0, lambda: self.progress.configure(value=pct))
 
     def _browse(self):
@@ -439,7 +642,7 @@ class GhidraInstallerWindows(tk.Tk):
                 text=label, fg="#4CAF50"))
         else:
             self.after(0, lambda: self.lbl_java.configure(
-                text=label + " — will auto-install", fg="darkorange"))
+                text=label + " — will be installed automatically", fg="orange"))
 
     @staticmethod
     def _probe_java(min_major: int = DEFAULT_JAVA_MAJOR) -> tuple:
@@ -1105,14 +1308,12 @@ class GhidraInstallerWindows(tk.Tk):
         self.lbl_size.configure(text=fmt_size(r["size"]))
         self._expected_sha = r["sha256"]
         self._sha_source   = r.get("sha_source", "")
-        if not hasattr(self, "_sha_default_fg"):
-            self._sha_default_fg = self.lbl_sha.cget("fg")
         self.lbl_sha.configure(
             text=r["sha256"] if r["sha256"] else "Not published — can't be verified",
-            fg=self._sha_default_fg if r["sha256"] else "darkorange")
+            fg="gray" if r["sha256"] else "orange")
         self.lbl_natives.configure(
-            text="✅ pre-built win_x86_64 binaries included",
-            fg="#4CAF50")
+            text="Pre-built Windows binaries included",
+            fg="green")
 
         self.btn_install.configure(state="normal", text="Download & Install")
         self.entry_dir.configure(state="normal")
@@ -1694,7 +1895,7 @@ class GhidraInstallerWindows(tk.Tk):
     # ── Finish ────────────────────────────────────────────────────
 
     def _finish(self, ghidra_dir: Path):
-        self._set_status("✓ Installation complete!", "green")
+        self._set_status("Installation complete.", "green")
         self._set_progress(100)
         self._set_detail(str(ghidra_dir))
         self.btn_install.configure(state="normal", text="Reinstall")
@@ -1724,16 +1925,9 @@ class GhidraInstallerWindows(tk.Tk):
         dlg.transient(self)
         dlg.grab_set()
 
-        # Dark header
-        hdr = tk.Frame(dlg, bg="#16213e")
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Manage Ghidra Installations",
-                 font=("Segoe UI", 14, "bold"),
-                 fg="white", bg="#16213e", pady=12).pack()
-        tk.Label(hdr,
-                 text="Select a version to uninstall or repair its shortcuts.",
-                 font=("Segoe UI", 10),
-                 fg="#8892b0", bg="#16213e").pack(pady=(0, 10))
+        self.theme.banner(dlg, "Manage Ghidra Installations",
+                          "Select a version to uninstall or repair its shortcuts.",
+                          title_size=16).pack(fill="x")
 
         # Treeview
         tv_frame = tk.Frame(dlg, padx=16, pady=10)
@@ -2098,5 +2292,11 @@ class GhidraInstallerWindows(tk.Tk):
 # ──────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Crisp (not blurry, bitmap-scaled) text on high-DPI displays
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
     app = GhidraInstallerWindows()
     app.mainloop()

@@ -1,11 +1,11 @@
-# Builds GhidraInstaller.exe on a GitHub-hosted Windows machine.
+# Builds GhidraInstaller-windows.exe on a GitHub-hosted Windows machine.
 #
 # Runs when:
 #   • you start it from your Mac:   python3 build_windows_on_github.py
 #   • you click "Run workflow" on the repo's Actions tab
 #   • you publish a GitHub release — the zip is attached to that release
 #
-# Output: GhidraInstaller_Windows.zip  (contains GhidraInstaller.exe)
+# Output: GhidraInstaller_Windows.zip  (contains GhidraInstaller-windows.exe)
 
 name: Build Windows installer
 
@@ -54,7 +54,7 @@ jobs:
             Write-Host "::warning::Could not download the Ghidra icon - building with the default icon"
           }
 
-      - name: Build GhidraInstaller.exe
+      - name: Build GhidraInstaller-windows.exe
         shell: pwsh
         run: |
           $pyiArgs = @(
@@ -70,22 +70,22 @@ jobs:
           if (Test-Path ghidra.ico) { $pyiArgs += @("--icon", "ghidra.ico") }
           $pyiArgs += "ghidra_installer_windows.py"
           python -m PyInstaller @pyiArgs
-          if (-not (Test-Path dist\GhidraInstaller.exe)) { throw "GhidraInstaller.exe was not produced" }
+          if (-not (Test-Path dist\GhidraInstaller-windows.exe)) { throw "GhidraInstaller-windows.exe was not produced" }
 
       - name: Smoke-test the executable
         shell: pwsh
         run: |
           # Start the GUI, give it a few seconds, make sure it didn't crash on launch.
-          $p = Start-Process -FilePath dist\GhidraInstaller.exe -PassThru
+          $p = Start-Process -FilePath dist\GhidraInstaller-windows.exe -PassThru
           Start-Sleep -Seconds 8
-          if ($p.HasExited) { throw "GhidraInstaller.exe exited straight away (code $($p.ExitCode))" }
+          if ($p.HasExited) { throw "GhidraInstaller-windows.exe exited straight away (code $($p.ExitCode))" }
           Stop-Process -Id $p.Id -Force
           Write-Host "Launched and stayed running - OK"
 
       - name: Package zip
         shell: pwsh
         run: |
-          Compress-Archive -Path dist\GhidraInstaller.exe -DestinationPath GhidraInstaller_Windows.zip -Force
+          Compress-Archive -Path dist\GhidraInstaller-windows.exe -DestinationPath GhidraInstaller_Windows.zip -Force
           $h = (Get-FileHash GhidraInstaller_Windows.zip -Algorithm SHA256).Hash.ToLower()
           Write-Host "GhidraInstaller_Windows.zip  SHA-256: $h"
           "### Windows build`n`n``GhidraInstaller_Windows.zip`` SHA-256: ``$h``" >> $env:GITHUB_STEP_SUMMARY
